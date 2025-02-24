@@ -3,6 +3,11 @@
 #define SWITCH_PIN 12  // Define the pin for the on/off switch
 
 #include <LiquidCrystal_I2C.h> // Library for LCD
+#include <WiFi.h> // Library for Wi-Fi
+
+// Wi-Fi credentials
+const char* ssid = "Production FTY A"; // Replace with your Wi-Fi SSID
+const char* password = "Wifi.gla@2025"; // Replace with your Wi-Fi password
 
 String lastScannedUID = "";  // Variable to store the last scanned UID
 LiquidCrystal_I2C lcd(0x27, 20, 4); // I2C address 0x27, 20 column and 4 rows
@@ -11,13 +16,17 @@ unsigned long lastScanTime = 0; // Variable to track the time of last scan
 unsigned long debounceDelay = 2000; // Delay before allowing another scan (2 seconds)
 bool isCardPresent = false; // Flag to track if a card is present
 int previousSwitchState = HIGH; // Variable to store the previous switch state
+int switchState = HIGH; // Variable to store the current switch state
+
+// Variables for switch debouncing
+unsigned long lastDebounceTime = 0; // Timestamp of the last state change
+unsigned long debounceInterval = 50; // Debounce interval in milliseconds
 
 void setup() {
   Serial.begin(115200);
   Serial2.begin(9600, SERIAL_8N1, RXD2, -1);
   pinMode(BUZZER_PIN, OUTPUT);  // Set the buzzer pin as output
   pinMode(SWITCH_PIN, INPUT);   // Set the switch pin as input
-  Serial.println("Menunggu kartu RFID...");
 
   // Initialize LCD
   lcd.init();  // Initialize LCD
@@ -25,25 +34,68 @@ void setup() {
 
   // Display initial message on LCD
   lcd.setCursor(0, 0);  // Top row
-  lcd.print("Menunggu kartu...");
+  lcd.print("Connecting to Wi-Fi");
+
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+    lcd.setCursor(0, 1);  // Bottom row
+    lcd.print("Connecting...");
+  }
+
+  // Once connected, display "Connected"
+  lcd.clear();
+  lcd.setCursor(0, 0);  // Top row
+  lcd.print("Wi-Fi Connected");
+  lcd.setCursor(0, 1);  // Bottom row
+  lcd.print("IP: ");
+  lcd.print(WiFi.localIP());
+  delay(2000); // Show the IP address for 2 seconds
+
+  // After Wi-Fi is connected, check the switch state and display the appropriate title
+  switchState = digitalRead(SWITCH_PIN);
+  lcd.clear();
+  lcd.setCursor(0, 0);  // Top row
+  if (switchState == HIGH) {
+    lcd.print("Menunggu kartu...");
+    Serial.println("Menunggu Kartu");
+  } else {
+    Serial.println("Stock in");
+    lcd.print("Stock In         "); // Clear any leftover text with spaces
+  }
+  previousSwitchState = switchState; // Update the previous switch state
 }
 
 void loop() {
-  int switchState = digitalRead(SWITCH_PIN);  // Read the state of the switch
+  // Read the current state of the switch
+  int reading = digitalRead(SWITCH_PIN);
 
-  // Check if the switch state has changed
-  if (switchState != previousSwitchState) {
-    // Update the LCD only if the switch state has changed
-    lcd.setCursor(0, 0);  // Top row
-    if (switchState == HIGH) {
-      Serial.println("Menunggu Kartu");
-      lcd.print("Menunggu kartu...");
-    } else {
-      Serial.println("Stock in");
-      lcd.print("Stock In         "); // Clear any leftover text with spaces
-    }
-    previousSwitchState = switchState; // Update the previous switch state
+  // If the switch state has changed, reset the debounce timer
+  if (reading != previousSwitchState) {
+    lastDebounceTime = millis(); // Reset debounce timer
   }
+
+  // Only change the state if it has been stable for the debounce interval
+  if ((millis() - lastDebounceTime) > debounceInterval) {
+    if (reading != switchState) {
+      switchState = reading;  // Update the switch state
+
+      // Update the LCD title based on the switch state
+      lcd.setCursor(0, 0);  // Top row
+      if (switchState == HIGH) {
+        Serial.println("Menunggu Kartu");
+        lcd.print("Menunggu kartu...");
+      } else {
+        Serial.println("Stock in");
+        lcd.print("Stock In         "); // Clear any leftover text with spaces
+      }
+    }
+  }
+
+  // Save the reading for the next loop iteration
+  previousSwitchState = reading;
 
   if (Serial2.available()) {
     char buffer[14];
